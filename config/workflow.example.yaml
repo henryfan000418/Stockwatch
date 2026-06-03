@@ -1,0 +1,115 @@
+workflow:
+  name: stockwatch-financial-news-agent
+  timezone: America/Chicago
+  base_currency: USD
+
+monitoring:
+  news_refresh_minutes: 30
+  daily_digest_time: "16:30"
+  weekly_research_day: Saturday
+  languages:
+    - en
+    - zh
+
+sources:
+  news:
+    - name: Yahoo Finance
+      type: rss
+      url: https://finance.yahoo.com/news/rssindex
+      extract_tickers: true
+    - name: CNBC Markets
+      type: rss
+      url: https://www.cnbc.com/id/100003114/device/rss/rss.html
+      extract_tickers: true
+    - name: SEC Press Releases
+      type: rss
+      url: https://www.sec.gov/news/pressreleases.rss
+      extract_tickers: false
+  filings:
+    sec_companyfacts: https://data.sec.gov/api/xbrl/companyfacts/
+    sec_submissions: https://data.sec.gov/submissions/
+    sec_company_tickers: https://www.sec.gov/files/company_tickers.json
+
+discovery:
+  industry_keywords:
+    Semiconductors:
+      - chip
+      - chips
+      - semiconductor
+      - semiconductors
+      - foundry
+      - GPU
+      - wafer
+    Artificial Intelligence:
+      - artificial intelligence
+      - generative AI
+      - AI model
+      - AI chip
+      - data center
+    Cloud Infrastructure:
+      - cloud
+      - hyperscaler
+      - data center
+      - server
+      - infrastructure
+    Cybersecurity:
+      - cybersecurity
+      - cyberattack
+      - ransomware
+      - breach
+      - zero trust
+    Healthcare:
+      - healthcare
+      - biotech
+      - pharma
+      - drug approval
+      - clinical trial
+    Energy:
+      - oil
+      - natural gas
+      - LNG
+      - solar
+      - battery
+      - uranium
+  catalyst_keywords:
+    - earnings
+    - guidance
+    - merger
+    - acquisition
+    - lawsuit
+    - investigation
+    - approval
+    - contract
+    - partnership
+    - tariff
+    - regulation
+    - recall
+    - upgrade
+    - downgrade
+
+scoring:
+  weights:
+    ticker_news_mentions: 0.30
+    source_breadth: 0.20
+    industry_theme_strength: 0.20
+    catalyst_strength: 0.20
+    recency: 0.10
+  thresholds:
+    watchlist_min_score: 45
+    report_min_score: 65
+
+reports:
+  output_dir: outputs
+  include_sections:
+    - executive_summary
+    - latest_news
+    - discovered_industry_theme
+    - business_overview
+    - financial_statement_review
+    - valuation_context
+    - industry_comparison
+    - catalysts
+    - risks
+    - pros_and_cons
+    - investment_watch_actions
+
