@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Stockwatch{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .prose-sm h2 { font-size: 1rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+    .prose-sm h3 { font-size: 0.9rem; font-weight: 600; margin: 0.75rem 0 0.25rem; }
+    .prose-sm ul { list-style: disc; padding-left: 1.25rem; margin: 0.5rem 0; }
+    .prose-sm li { margin: 0.2rem 0; font-size: 0.875rem; }
+    .prose-sm p  { font-size: 0.875rem; margin: 0.4rem 0; line-height: 1.6; }
+    .prose-sm strong { font-weight: 700; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+  <!-- Navbar -->
+  <nav class="bg-slate-900 text-white shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-6">
+      <a href="/" class="flex items-center gap-2 font-bold text-xl tracking-tight hover:text-emerald-400 transition-colors">
+        <span>📈</span> Stockwatch
+      </a>
+      {% if data and data.generated_at %}
+      <span class="text-slate-400 text-xs">最后更新：{{ data.generated_at }}</span>
+      {% endif %}
+      <div class="ml-auto flex items-center gap-3">
+        <a href="/" class="text-slate-300 hover:text-white text-sm transition-colors">总览</a>
+        <form method="post" action="/run" x-data="{ loading: false }" @submit="loading = true">
+          <button type="submit"
+            :disabled="loading"
+            :class="loading ? 'opacity-60 cursor-wait' : 'hover:bg-emerald-500'"
+            class="bg-emerald-600 text-white text-sm px-3 py-1.5 rounded-md transition-colors flex items-center gap-1">
+            <span x-show="!loading">⟳ 重新运行</span>
+            <span x-show="loading" x-cloak>⟳ 运行中...</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Content -->
+  <main class="max-w-7xl mx-auto px-4 py-6">
+    {% block content %}{% endblock %}
+  </main>
+
+</body>
+</html>

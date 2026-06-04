@@ -44,10 +44,20 @@ class AgentSignal:
 
 
 @dataclass(frozen=True)
+class FinancialReportSignal:
+    """Output from the financial report + analyst consensus agent."""
+    financials: dict[str, Any] = field(default_factory=dict)
+    analyst_consensus: dict[str, Any] = field(default_factory=dict)
+    llm_summary: str = ""
+    quarterly_data: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class EnrichedStockCandidate:
     """StockCandidate augmented with AI agent analysis."""
     base: StockCandidate
     sentiment: AgentSignal | None = None
     fundamentals: AgentSignal | None = None
+    financial_report: FinancialReportSignal | None = None
     thesis: str = ""
     overall_confidence: float = 0.0

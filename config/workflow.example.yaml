@@ -169,5 +169,6 @@ agents:
   max_candidates_to_analyze: 10
   run_sentiment: true
   run_fundamentals: true
+  run_financial_report: true   # yfinance 财报 + 分析师共识（免费，无需 API Key）
   run_thesis: true
 

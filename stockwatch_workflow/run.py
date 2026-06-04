@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -15,10 +16,11 @@ from stockwatch_workflow.models import (
     NewsItem,
     StockCandidate,
     AgentSignal,
+    FinancialReportSignal,
     EnrichedStockCandidate,
 )
 from stockwatch_workflow.news import fetch_rss_news, fetch_newsapi_news, fetch_reddit_news
-from stockwatch_workflow.news.rss_fetcher import extract_tickers, extract_industries
+from stockwatch_workflow.news.rss_fetcher import extract_industries
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -103,7 +105,11 @@ def _format_counter(counter: Counter[str]) -> list[str]:
     return [f"- {name}: {count}" for name, count in counter.most_common(10)]
 
 
-def score_candidates(news_items: list[NewsItem], config: dict[str, Any]) -> list[StockCandidate]:
+def score_candidates(
+    news_items: list[NewsItem],
+    config: dict[str, Any],
+) -> tuple[list[StockCandidate], dict[str, list[NewsItem]]]:
+    """Returns (sorted candidates, ticker→news mapping)."""
     ticker_news: dict[str, list[NewsItem]] = defaultdict(list)
     for item in news_items:
         for ticker in item.tickers:
@@ -139,7 +145,16 @@ def score_candidates(news_items: list[NewsItem], config: dict[str, Any]) -> list
             )
         )
 
-    return sorted(candidates, key=lambda c: c.score, reverse=True)
+    sorted_candidates = sorted(candidates, key=lambda c: c.score, reverse=True)
+    return sorted_candidates, dict(ticker_news)
+
+
+def build_industry_news(news_items: list[NewsItem]) -> dict[str, list[NewsItem]]:
+    industry_news: dict[str, list[NewsItem]] = defaultdict(list)
+    for item in news_items:
+        for industry in item.sectors:
+            industry_news[industry].append(item)
+    return dict(industry_news)
 
 
 def _score_recency(news_items: list[NewsItem]) -> int:
@@ -210,12 +225,14 @@ def run_agent_pipeline(
     from stockwatch_workflow.agents import (
         run_sentiment_agent,
         run_fundamentals_agent,
+        run_financial_report_agent,
         run_thesis_agent,
     )
 
     max_analyze = agent_cfg.get("max_candidates_to_analyze", 10)
     run_sentiment = agent_cfg.get("run_sentiment", True)
     run_fund = agent_cfg.get("run_fundamentals", True)
+    run_fin_report = agent_cfg.get("run_financial_report", True)
     run_thesis = agent_cfg.get("run_thesis", True)
 
     enriched: list[EnrichedStockCandidate] = []
@@ -230,9 +247,13 @@ def run_agent_pipeline(
         if run_fund:
             fundamentals = run_fundamentals_agent(candidate.symbol, config)
 
+        financial_report: FinancialReportSignal | None = None
+        if run_fin_report:
+            financial_report = run_financial_report_agent(candidate.symbol, llm_client)
+
         thesis = ""
-        if run_thesis and llm_client:
-            thesis = run_thesis_agent(candidate, sentiment, fundamentals, llm_client)
+        if run_thesis:
+            thesis = run_thesis_agent(candidate, sentiment, fundamentals, llm_client, financial_report)
 
         scores = [s.confidence for s in [sentiment, fundamentals] if s is not None]
         overall_conf = round(sum(scores) / len(scores), 1) if scores else 0.0
@@ -242,6 +263,7 @@ def run_agent_pipeline(
                 base=candidate,
                 sentiment=sentiment,
                 fundamentals=fundamentals,
+                financial_report=financial_report,
                 thesis=thesis,
                 overall_confidence=overall_conf,
             )
@@ -251,16 +273,111 @@ def run_agent_pipeline(
 
 
 # ---------------------------------------------------------------------------
-# Output writers
+# JSON output (drives the web frontend)
+# ---------------------------------------------------------------------------
+
+def _news_to_dict(item: NewsItem) -> dict[str, Any]:
+    return {
+        "title": item.title,
+        "source": item.source,
+        "url": item.url,
+        "published_at": item.published_at.isoformat() if item.published_at else None,
+        "summary": item.summary,
+        "tickers": list(item.tickers),
+        "sectors": list(item.sectors),
+    }
+
+
+def _signal_to_dict(sig: AgentSignal | None) -> dict[str, Any] | None:
+    if sig is None:
+        return None
+    return {"signal": sig.signal, "confidence": sig.confidence, "reasoning": sig.reasoning}
+
+
+def _fin_report_to_dict(fr: FinancialReportSignal | None) -> dict[str, Any] | None:
+    if fr is None:
+        return None
+    return {
+        "financials": fr.financials,
+        "analyst_consensus": fr.analyst_consensus,
+        "llm_summary": fr.llm_summary,
+        "quarterly_data": fr.quarterly_data,
+    }
+
+
+def write_json_output(
+    news_items: list[NewsItem],
+    candidates: list[StockCandidate],
+    ticker_news: dict[str, list[NewsItem]],
+    industry_news: dict[str, list[NewsItem]],
+    enriched_candidates: list[EnrichedStockCandidate],
+    config: dict[str, Any],
+    output_dir: Path,
+) -> Path:
+    enriched_map = {e.base.symbol: e for e in enriched_candidates}
+
+    industries_data = []
+    for industry, items in sorted(industry_news.items(), key=lambda x: len(x[1]), reverse=True):
+        related_text = " ".join(f"{i.title} {i.summary}" for i in items)
+        catalysts = list(extract_catalysts(related_text, config))
+        industries_data.append({
+            "name": industry,
+            "article_count": len(items),
+            "catalysts": catalysts,
+            "news_items": [_news_to_dict(i) for i in sorted(
+                items, key=lambda x: x.published_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True
+            )],
+        })
+
+    candidates_data = []
+    for c in candidates:
+        enriched = enriched_map.get(c.symbol)
+        ai_data: dict[str, Any] = {}
+        if enriched:
+            ai_data = {
+                "overall_confidence": enriched.overall_confidence,
+                "sentiment": _signal_to_dict(enriched.sentiment),
+                "fundamentals": _signal_to_dict(enriched.fundamentals),
+                "financial_report": _fin_report_to_dict(enriched.financial_report),
+                "thesis": enriched.thesis,
+            }
+
+        related = ticker_news.get(c.symbol, [])
+        candidates_data.append({
+            "symbol": c.symbol,
+            "company_name": c.company_name,
+            "score": c.score,
+            "thesis": c.thesis,
+            "catalysts": list(c.catalysts),
+            "risks": list(c.risks),
+            "source_urls": list(c.source_urls),
+            "news_items": [_news_to_dict(i) for i in sorted(
+                related, key=lambda x: x.published_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True
+            )],
+            "ai": ai_data,
+        })
+
+    sources = list({item.source for item in news_items})
+    payload = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "total_articles": len(news_items),
+        "sources": sorted(sources),
+        "industries": industries_data,
+        "candidates": candidates_data,
+    }
+
+    path = output_dir / "latest_run.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+# ---------------------------------------------------------------------------
+# CSV / MD output writers (unchanged)
 # ---------------------------------------------------------------------------
 
 def write_industry_themes(news_items: list[NewsItem], config: dict[str, Any], output_dir: Path) -> Path:
     path = output_dir / f"industry_themes_{datetime.now().date().isoformat()}.csv"
-    industry_news: dict[str, list[NewsItem]] = defaultdict(list)
-    for item in news_items:
-        for industry in item.sectors:
-            industry_news[industry].append(item)
-
+    industry_news = build_industry_news(news_items)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=["industry", "article_count", "catalysts", "top_headlines", "source_urls"])
         writer.writeheader()
@@ -298,61 +415,59 @@ def write_watchlist(candidates: list[StockCandidate], output_dir: Path) -> Path:
 
 
 def write_enriched_report(enriched: EnrichedStockCandidate, output_dir: Path) -> Path:
-    """Write an AI-generated research report for an enriched candidate."""
     reports_dir = output_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     symbol = enriched.base.symbol
     path = reports_dir / f"{symbol}_{datetime.now().date().isoformat()}.md"
 
-    sentiment_section = ""
+    sections = [
+        f"# {symbol} Research Report",
+        "",
+        f"Generated at: {datetime.now().isoformat(timespec='seconds')}",
+        f"Heuristic Score: {enriched.base.score:.1f}/100 | AI Confidence: {enriched.overall_confidence:.0f}%",
+        "",
+    ]
+
     if enriched.sentiment:
         s = enriched.sentiment
-        sentiment_section = (
-            f"## Sentiment Analysis\n\n"
-            f"- Signal: **{s.signal.upper()}** (confidence: {s.confidence:.0f}%)\n"
-            f"- Themes: {', '.join(s.reasoning.get('key_themes', []))}\n"
-            f"- Summary: {s.reasoning.get('summary', '')}\n"
-        )
+        sections += [
+            "## Sentiment Analysis",
+            f"- Signal: **{s.signal.upper()}** (confidence: {s.confidence:.0f}%)",
+            f"- Themes: {', '.join(s.reasoning.get('key_themes', []))}",
+            f"- Summary: {s.reasoning.get('summary', '')}",
+            "",
+        ]
 
-    fundamentals_section = ""
     if enriched.fundamentals:
         f = enriched.fundamentals
         r = f.reasoning
-        fundamentals_section = (
-            f"## Fundamental Analysis\n\n"
-            f"- Signal: **{f.signal.upper()}** (confidence: {f.confidence:.0f}%)\n"
-            f"- Profitability: {r.get('profitability', {})}\n"
-            f"- Growth: {r.get('growth', {})}\n"
-            f"- Financial Health: {r.get('financial_health', {})}\n"
-            f"- Valuation: {r.get('valuation', {})}\n"
-        )
+        sections += [
+            "## Fundamental Analysis",
+            f"- Signal: **{f.signal.upper()}** (confidence: {f.confidence:.0f}%)",
+            f"- Profitability: {r.get('profitability', {})}",
+            f"- Growth: {r.get('growth', {})}",
+            f"- Financial Health: {r.get('financial_health', {})}",
+            f"- Valuation: {r.get('valuation', {})}",
+            "",
+        ]
 
-    thesis_section = enriched.thesis or (
-        f"## Investment Thesis\n\n{enriched.base.thesis}\n\n"
-        f"## Risks\n\n" + "\n".join(f"- {r}" for r in enriched.base.risks)
-    )
+    if enriched.financial_report:
+        fr = enriched.financial_report
+        sections += [
+            "## Financial Report",
+            fr.llm_summary,
+            f"- Revenue trend: {fr.financials.get('revenue_trend', 'N/A')}",
+            f"- Analyst consensus: {fr.analyst_consensus.get('consensus', 'N/A')} ({fr.analyst_consensus.get('upside_downside', 'N/A')} upside)",
+            "",
+        ]
 
-    path.write_text(
-        "\n".join([
-            f"# {symbol} Research Report",
-            "",
-            f"Generated at: {datetime.now().isoformat(timespec='seconds')}",
-            f"Heuristic Score: {enriched.base.score:.1f}/100 | AI Confidence: {enriched.overall_confidence:.0f}%",
-            "",
-            "## Source URLs",
-            *[f"- {u}" for u in enriched.base.source_urls],
-            "",
-            sentiment_section,
-            fundamentals_section,
-            thesis_section,
-        ]),
-        encoding="utf-8",
-    )
+    sections.append(enriched.thesis or f"## Investment Thesis\n\n{enriched.base.thesis}")
+
+    path.write_text("\n".join(sections), encoding="utf-8")
     return path
 
 
 def write_report_stub(candidate: StockCandidate, output_dir: Path) -> Path:
-    """Fallback static report when AI agents are not enabled."""
     reports_dir = output_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     path = reports_dir / f"{candidate.symbol}_{datetime.now().date().isoformat()}.md"
@@ -368,20 +483,8 @@ def write_report_stub(candidate: StockCandidate, output_dir: Path) -> Path:
             "## Latest News And Catalysts",
             *[f"- {item}" for item in candidate.catalysts],
             "",
-            "## Financial Statement Review",
-            "- Pull latest 10-K, 10-Q, earnings release, revenue growth, margins, cash flow, debt, and guidance before investment use.",
-            "",
-            "## Pros",
-            "- News flow created an objective research trigger without using a preselected ticker list.",
-            "",
             "## Cons And Risks",
             *[f"- {item}" for item in candidate.risks],
-            "- Ticker extraction from headlines can include false positives and must be validated.",
-            "",
-            "## Next Actions",
-            "- Confirm ticker identity and company name from a trusted market data source.",
-            "- Verify business impact from primary filings.",
-            "- Compare valuation and operating metrics against industry peers.",
         ]) + "\n",
         encoding="utf-8",
     )
@@ -389,13 +492,9 @@ def write_report_stub(candidate: StockCandidate, output_dir: Path) -> Path:
 
 
 def write_industry_report_stub(news_items: list[NewsItem], output_dir: Path) -> Path | None:
-    industry_news: dict[str, list[NewsItem]] = defaultdict(list)
-    for item in news_items:
-        for industry in item.sectors:
-            industry_news[industry].append(item)
+    industry_news = build_industry_news(news_items)
     if not industry_news:
         return None
-
     industry, related_news = max(industry_news.items(), key=lambda e: len(e[1]))
     reports_dir = output_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -407,14 +506,10 @@ def write_industry_report_stub(news_items: list[NewsItem], output_dir: Path) -> 
             f"Generated at: {datetime.now().isoformat(timespec='seconds')}",
             "",
             "## Executive Summary",
-            f"The current news flow surfaced {industry} as a target industry/theme for follow-up research.",
+            f"The current news flow surfaced {industry} as a target industry/theme.",
             "",
             "## Latest News",
             *[f"- {item.title} - {item.source} - {item.url}" for item in related_news[:10]],
-            "",
-            "## Financial Analysis To Complete",
-            "- Identify public companies with direct revenue exposure to this theme.",
-            "- Compare revenue growth, margins, free cash flow, leverage, valuation multiples, and guidance revisions.",
         ]) + "\n",
         encoding="utf-8",
     )
@@ -422,7 +517,7 @@ def write_industry_report_stub(news_items: list[NewsItem], output_dir: Path) -> 
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Main workflow
 # ---------------------------------------------------------------------------
 
 def run_workflow(config_path: Path, mode: str) -> None:
@@ -438,7 +533,9 @@ def run_workflow(config_path: Path, mode: str) -> None:
     digest_path = output_dir / f"news_digest_{datetime.now().date().isoformat()}.md"
     digest_path.write_text(build_digest(news_items, config), encoding="utf-8")
 
-    candidates = score_candidates(news_items, config)
+    candidates, ticker_news = score_candidates(news_items, config)
+    industry_news = build_industry_news(news_items)
+
     watchlist_threshold = config.get("scoring", {}).get("thresholds", {}).get("watchlist_min_score", 45)
     report_threshold = config.get("scoring", {}).get("thresholds", {}).get("report_min_score", 65)
     watchlist_candidates = [c for c in candidates if c.score >= watchlist_threshold]
@@ -446,6 +543,10 @@ def run_workflow(config_path: Path, mode: str) -> None:
     industry_path = write_industry_themes(news_items, config, output_dir)
 
     enriched_candidates = run_agent_pipeline(candidates, news_items, config)
+
+    json_path = write_json_output(
+        news_items, candidates, ticker_news, industry_news, enriched_candidates, config, output_dir
+    )
 
     report_path = None
     if mode in {"daily", "weekly"}:
@@ -462,6 +563,7 @@ def run_workflow(config_path: Path, mode: str) -> None:
     print(f"Digest:          {digest_path}")
     print(f"Industry themes: {industry_path}")
     print(f"Watchlist:       {watchlist_path}")
+    print(f"JSON data:       {json_path}")
     if report_path:
         print(f"Report:          {report_path}")
     if enriched_candidates:

@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+{% block title %}{{ candidate.symbol if candidate else "股票" }} — Stockwatch{% endblock %}
+
+{% block content %}
+{% if not candidate %}
+<div class="text-center py-20 text-slate-500">
+  <p class="text-5xl mb-4">🔍</p>
+  <p class="text-lg">未找到该股票数据</p>
+  <a href="/" class="mt-4 inline-block text-blue-600 hover:underline text-sm">← 返回总览</a>
+</div>
+{% else %}
+{% set ai = candidate.ai %}
+
+<!-- Header -->
+<div class="mb-6">
+  <a href="/" class="text-slate-500 hover:text-slate-800 text-sm flex items-center gap-1 mb-3 w-fit">← 返回总览</a>
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <div class="flex items-start justify-between flex-wrap gap-4">
+      <div>
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center font-bold text-slate-700">
+            {{ candidate.symbol[:3] }}
+          </div>
+          <h1 class="text-2xl font-bold text-slate-800">{{ candidate.symbol }}</h1>
+        </div>
+        <p class="text-xs text-slate-500 max-w-xl leading-relaxed">{{ candidate.thesis }}</p>
+      </div>
+      <div class="flex gap-4 text-center">
+        <div class="bg-slate-50 rounded-xl px-4 py-3">
+          <p class="text-2xl font-bold
+            {% if candidate.score >= 65 %}text-emerald-600
+            {% elif candidate.score >= 45 %}text-blue-600
+            {% else %}text-slate-500{% endif %}">
+            {{ candidate.score | int }}
+          </p>
+          <p class="text-[10px] text-slate-400 mt-0.5">启发式评分</p>
+        </div>
+        {% if ai and ai.overall_confidence %}
+        <div class="bg-slate-50 rounded-xl px-4 py-3">
+          <p class="text-2xl font-bold text-violet-600">{{ ai.overall_confidence | int }}%</p>
+          <p class="text-[10px] text-slate-400 mt-0.5">AI 置信度</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="space-y-4">
+
+{% if ai %}
+
+  <!-- Sentiment Agent -->
+  {% if ai.sentiment %}
+  {% set s = ai.sentiment %}
+  {% set sc = s.signal | signal_color %}
+  <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" x-data="{ open: false }">
+    <button @click="open = !open" class="w-full p-4 text-left flex items-center justify-between hover:bg-slate-50 transition-colors">
+      <div class="flex items-center gap-3">
+        <span class="text-lg">💬</span>
+        <div>
+          <p class="font-semibold text-slate-800 text-sm">情感分析 Agent</p>
+          <p class="text-xs text-slate-400 mt-0.5">{{ s.reasoning.get('summary', '') }}</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+        <span class="text-xs px-2.5 py-1 rounded-full font-semibold
+          {% if sc == 'green' %}bg-emerald-100 text-emerald-700
+          {% elif sc == 'red' %}bg-red-100 text-red-700
+          {% else %}bg-slate-100 text-slate-600{% endif %}">
+          {{ s.signal | upper }}
+        </span>
+        <div class="w-20 bg-slate-100 rounded-full h-1.5">
+          <div class="h-1.5 rounded-full
+            {% if sc == 'green' %}bg-emerald-500
+            {% elif sc == 'red' %}bg-red-500
+            {% else %}bg-slate-400{% endif %}"
+            style="width: {{ s.confidence }}%"></div>
+        </div>
+        <span class="text-xs text-slate-500 w-8">{{ s.confidence | int }}%</span>
+        <span class="text-slate-400 text-sm" x-text="open ? '▲' : '▼'"></span>
+      </div>
+    </button>
+    <div x-show="open" x-cloak class="border-t border-slate-100 px-4 py-4 bg-slate-50">
+      {% set r = s.reasoning %}
+      {% if r.get('key_themes') %}
+      <div class="mb-3">
+        <p class="text-xs font-semibold text-slate-600 mb-1.5">关键主题</p>
+        <div class="flex flex-wrap gap-1.5">
+          {% for t in r.key_themes %}
+          <span class="text-xs bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded">{{ t }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      <div class="grid grid-cols-3 gap-3">
+        {% for key, label, color in [
+          ('bullish_count', '看多', 'emerald'),
+          ('neutral_count', '中性', 'slate'),
+          ('bearish_count', '看空', 'red')
+        ] %}
+        <div class="bg-white rounded-lg p-3 border border-slate-100 text-center">
+          <p class="text-xl font-bold text-{{ color }}-600">{{ r.get(key, 0) }}</p>
+          <p class="text-[10px] text-slate-400 mt-0.5">{{ label }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Fundamentals Agent -->
+  {% if ai.fundamentals %}
+  {% set f = ai.fundamentals %}
+  {% set fc = f.signal | signal_color %}
+  <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" x-data="{ open: false }">
+    <button @click="open = !open" class="w-full p-4 text-left flex items-center justify-between hover:bg-slate-50 transition-colors">
+      <div class="flex items-center gap-3">
+        <span class="text-lg">📊</span>
+        <div>
+          <p class="font-semibold text-slate-800 text-sm">基本面分析 Agent</p>
+          <p class="text-xs text-slate-400 mt-0.5">盈利 / 成长 / 健康 / 估值 四维评分</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+        <span class="text-xs px-2.5 py-1 rounded-full font-semibold
+          {% if fc == 'green' %}bg-emerald-100 text-emerald-700
+          {% elif fc == 'red' %}bg-red-100 text-red-700
+          {% else %}bg-slate-100 text-slate-600{% endif %}">
+          {{ f.signal | upper }}
+        </span>
+        <div class="w-20 bg-slate-100 rounded-full h-1.5">
+          <div class="h-1.5 rounded-full
+            {% if fc == 'green' %}bg-emerald-500
+            {% elif fc == 'red' %}bg-red-500
+            {% else %}bg-slate-400{% endif %}"
+            style="width: {{ f.confidence }}%"></div>
+        </div>
+        <span class="text-xs text-slate-500 w-8">{{ f.confidence | int }}%</span>
+        <span class="text-slate-400 text-sm" x-text="open ? '▲' : '▼'"></span>
+      </div>
+    </button>
+    <div x-show="open" x-cloak class="border-t border-slate-100 bg-slate-50">
+      {% set dims = [
+        ('profitability', '盈利能力', ['roe', 'net_margin', 'op_margin']),
+        ('growth',        '成长性',   ['revenue_growth', 'earnings_growth']),
+        ('financial_health', '财务健康', ['current_ratio', 'debt_to_equity']),
+        ('valuation',     '估值',     ['pe', 'pb', 'ps']),
+      ] %}
+      {% for key, label, fields in dims %}
+      {% set dim = f.reasoning.get(key, {}) %}
+      {% if dim %}
+      {% set dsig = dim.get('signal', 'neutral') %}
+      {% set dc = signal_color(dsig) %}
+      <div class="px-4 py-3 border-b border-slate-100 last:border-0">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-semibold text-slate-700">{{ label }}</p>
+          <span class="text-[10px] px-1.5 py-0.5 rounded font-medium
+            {% if dc == 'green' %}bg-emerald-100 text-emerald-700
+            {% elif dc == 'red' %}bg-red-100 text-red-700
+            {% else %}bg-slate-100 text-slate-500{% endif %}">
+            {{ dsig }}
+          </span>
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1">
+          {% for fld in fields %}
+          {% if dim.get(fld) and dim[fld] != 'N/A' %}
+          <span class="text-xs text-slate-500"><span class="font-medium text-slate-700">{{ fld | replace('_', ' ') | title }}</span>: {{ dim[fld] }}</span>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Financial Report Agent -->
+  {% if ai.financial_report %}
+  {% set fr = ai.financial_report %}
+  {% set fin = fr.financials %}
+  {% set cons = fr.analyst_consensus %}
+  <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" x-data="{ open: false }">
+    <button @click="open = !open" class="w-full p-4 text-left flex items-center justify-between hover:bg-slate-50 transition-colors">
+      <div class="flex items-center gap-3">
+        <span class="text-lg">📋</span>
+        <div>
+          <p class="font-semibold text-slate-800 text-sm">财报分析（过去一年）</p>
+          <div class="flex flex-wrap gap-2 mt-1.5">
+            {% for label, val, pos_val in [
+              ('营收', fin.get('revenue_trend',''), 'growing'),
+              ('利润率', fin.get('margin_trend',''), 'expanding'),
+              ('现金流', fin.get('fcf_trend',''), 'improving'),
+            ] %}
+            {% if val %}
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-medium
+              {% if val == pos_val %}bg-emerald-100 text-emerald-700
+              {% elif val in ['declining','contracting','deteriorating'] %}bg-red-100 text-red-700
+              {% else %}bg-slate-100 text-slate-500{% endif %}">
+              {{ label }}: {{ val }}
+            </span>
+            {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <span class="text-slate-400 text-sm flex-shrink-0 ml-3" x-text="open ? '▲' : '▼'"></span>
+    </button>
+    <div x-show="open" x-cloak class="border-t border-slate-100 bg-slate-50 p-4 space-y-4">
+
+      <!-- Key metrics -->
+      {% if fin.get('key_metrics') %}
+      <div>
+        <p class="text-xs font-semibold text-slate-600 mb-2">关键指标</p>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {% for k, v in fin.key_metrics.items() %}
+          <div class="bg-white rounded-lg border border-slate-100 p-2.5 text-center">
+            <p class="text-sm font-bold text-slate-800">{{ v }}</p>
+            <p class="text-[10px] text-slate-400 mt-0.5">{{ k }}</p>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- LLM summary -->
+      {% if fr.llm_summary %}
+      <div class="bg-white rounded-lg border border-slate-100 p-3">
+        <p class="text-xs font-semibold text-slate-600 mb-1">AI 综合分析</p>
+        <p class="text-xs text-slate-700 leading-relaxed">{{ fr.llm_summary }}</p>
+      </div>
+      {% endif %}
+
+      <!-- Quarterly table -->
+      {% if fr.quarterly_data %}
+      <div>
+        <p class="text-xs font-semibold text-slate-600 mb-2">季度财报明细</p>
+        <div class="overflow-x-auto rounded-lg border border-slate-100">
+          <table class="w-full text-xs">
+            <thead class="bg-slate-100 text-slate-600">
+              <tr>
+                <th class="px-3 py-2 text-left font-medium">期间</th>
+                <th class="px-3 py-2 text-right font-medium">营收</th>
+                <th class="px-3 py-2 text-right font-medium">净利润</th>
+                <th class="px-3 py-2 text-right font-medium">净利润率</th>
+                <th class="px-3 py-2 text-right font-medium">毛利率</th>
+                <th class="px-3 py-2 text-right font-medium">经营现金流</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-slate-50">
+              {% for q in fr.quarterly_data %}
+              <tr class="hover:bg-slate-50">
+                <td class="px-3 py-2 font-medium text-slate-700">{{ q.period }}</td>
+                <td class="px-3 py-2 text-right text-slate-600">{{ q.revenue }}</td>
+                <td class="px-3 py-2 text-right text-slate-600">{{ q.net_income }}</td>
+                <td class="px-3 py-2 text-right text-slate-600">{{ q.net_margin }}</td>
+                <td class="px-3 py-2 text-right text-slate-600">{{ q.gross_margin }}</td>
+                <td class="px-3 py-2 text-right text-slate-600">{{ q.operating_cash_flow }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+
+  <!-- Analyst Consensus -->
+  {% if cons %}
+  {% set cc = cons.get('consensus') | consensus_color %}
+  <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" x-data="{ open: false }">
+    <button @click="open = !open" class="w-full p-4 text-left flex items-center justify-between hover:bg-slate-50 transition-colors">
+      <div class="flex items-center gap-3">
+        <span class="text-lg">🏦</span>
+        <div>
+          <p class="font-semibold text-slate-800 text-sm">分析师研报共识</p>
+          <p class="text-xs text-slate-400 mt-0.5">{{ cons.get('analyst_count', 0) }} 位分析师 ·
+            目标价 {% if cons.get('avg_price_target') %}${{ cons.avg_price_target }}{% else %}N/A{% endif %}
+            ({{ cons.get('upside_downside', 'N/A') }})
+          </p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+        {% if cons.get('consensus') %}
+        <span class="text-xs px-2.5 py-1 rounded-full font-semibold
+          {% if cc == 'green' %}bg-emerald-100 text-emerald-700
+          {% elif cc == 'red' %}bg-red-100 text-red-700
+          {% elif cc == 'yellow' %}bg-yellow-100 text-yellow-700
+          {% else %}bg-slate-100 text-slate-600{% endif %}">
+          {{ cons.consensus | replace('_', ' ') | upper }}
+        </span>
+        {% endif %}
+        <span class="text-slate-400 text-sm" x-text="open ? '▲' : '▼'"></span>
+      </div>
+    </button>
+    <div x-show="open" x-cloak class="border-t border-slate-100 bg-slate-50 p-4 space-y-4">
+
+      <!-- Rating bar -->
+      {% set buy = (cons.get('strong_buy_count', 0) or 0) + (cons.get('buy_count', 0) or 0) %}
+      {% set hold = cons.get('hold_count', 0) or 0 %}
+      {% set sell = cons.get('sell_count', 0) or 0 %}
+      {% set total = buy + hold + sell %}
+      {% if total > 0 %}
+      <div>
+        <p class="text-xs font-semibold text-slate-600 mb-2">评级分布（{{ total }} 位分析师）</p>
+        <div class="flex rounded-full overflow-hidden h-3 bg-slate-100">
+          {% if buy > 0 %}<div class="bg-emerald-500" style="width: {{ (buy / total * 100) | int }}%" title="Buy: {{ buy }}"></div>{% endif %}
+          {% if hold > 0 %}<div class="bg-yellow-400" style="width: {{ (hold / total * 100) | int }}%" title="Hold: {{ hold }}"></div>{% endif %}
+          {% if sell > 0 %}<div class="bg-red-500" style="width: {{ (sell / total * 100) | int }}%" title="Sell: {{ sell }}"></div>{% endif %}
+        </div>
+        <div class="flex gap-4 mt-2">
+          <span class="text-[10px] text-emerald-600">● 买入 {{ buy }}</span>
+          <span class="text-[10px] text-yellow-600">● 持有 {{ hold }}</span>
+          <span class="text-[10px] text-red-600">● 卖出 {{ sell }}</span>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Price targets -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {% for label, key in [
+          ('当前价', 'current_price'),
+          ('平均目标价', 'avg_price_target'),
+          ('最高目标价', 'high_price_target'),
+          ('最低目标价', 'low_price_target'),
+        ] %}
+        {% if cons.get(key) %}
+        <div class="bg-white rounded-lg border border-slate-100 p-2.5 text-center">
+          <p class="text-sm font-bold text-slate-800">${{ cons[key] }}</p>
+          <p class="text-[10px] text-slate-400 mt-0.5">{{ label }}</p>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+
+      <!-- Analyst summary -->
+      {% if cons.get('summary') %}
+      <div class="bg-white rounded-lg border border-slate-100 p-3">
+        <p class="text-xs font-semibold text-slate-600 mb-1">AI 解读</p>
+        <p class="text-xs text-slate-700 leading-relaxed">{{ cons.summary }}</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}  {# end financial_report #}
+
+  <!-- AI Investment Thesis -->
+  {% if ai.thesis %}
+  <div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" x-data="{ open: true }">
+    <button @click="open = !open" class="w-full p-4 text-left flex items-center justify-between hover:bg-slate-50 transition-colors">
+      <div class="flex items-center gap-2">
+        <span class="text-lg">🤖</span>
+        <p class="font-semibold text-slate-800 text-sm">AI 投资论点（ThesisAgent）</p>
+      </div>
+      <span class="text-slate-400 text-sm" x-text="open ? '▲' : '▼'"></span>
+    </button>
+    <div x-show="open" class="border-t border-slate-100 p-4 prose-sm text-slate-700">
+      {{ ai.thesis | replace('\n', '<br>') | safe }}
+    </div>
+  </div>
+  {% endif %}
+
+{% else %}
+  <!-- No AI data -->
+  <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
+    暂无 AI 分析数据。在 <code class="bg-amber-100 px-1 rounded">config/workflow.example.yaml</code> 中将 <code class="bg-amber-100 px-1 rounded">agents.enabled</code> 设为 <code class="bg-amber-100 px-1 rounded">true</code> 并配置 LLM API Key，再重新运行工作流。
+  </div>
+{% endif %}
+
+<!-- Related News -->
+<div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden" x-data="{ open: true }">
+  <button @click="open = !open" class="w-full p-4 text-left flex items-center justify-between hover:bg-slate-50 transition-colors">
+    <div class="flex items-center gap-2">
+      <span class="text-lg">📰</span>
+      <p class="font-semibold text-slate-800 text-sm">相关财经新闻（{{ candidate.news_items | length }} 条，溯源）</p>
+    </div>
+    <span class="text-slate-400 text-sm" x-text="open ? '▲' : '▼'"></span>
+  </button>
+  <div x-show="open" class="border-t border-slate-100 divide-y divide-slate-50">
+    {% for item in candidate.news_items[:10] %}
+    <div class="px-4 py-3 hover:bg-slate-50 transition-colors">
+      <div class="flex items-start gap-2">
+        <div class="flex-1 min-w-0">
+          <div class="flex flex-wrap items-center gap-1.5 mb-1">
+            <span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{{ item.source }}</span>
+            {% if item.published_at %}
+            <span class="text-[10px] text-slate-400">{{ item.published_at[:10] }}</span>
+            {% endif %}
+          </div>
+          <p class="text-sm font-medium text-slate-800 leading-snug">
+            {% if item.url %}
+            <a href="{{ item.url }}" target="_blank" rel="noopener" class="hover:text-blue-600 transition-colors">
+              {{ item.title }}
+            </a>
+            {% else %}
+            {{ item.title }}
+            {% endif %}
+          </p>
+          {% if item.summary %}
+          <p class="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">{{ item.summary }}</p>
+          {% endif %}
+        </div>
+        {% if item.url %}
+        <a href="{{ item.url }}" target="_blank" rel="noopener"
+           class="flex-shrink-0 text-slate-300 hover:text-blue-500 transition-colors mt-0.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
+        </a>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <p class="px-4 py-3 text-slate-400 text-sm">暂无相关新闻。</p>
+    {% endfor %}
+  </div>
+</div>
+
+</div>
+{% endif %}
+{% endblock %}
