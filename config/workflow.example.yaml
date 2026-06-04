@@ -25,6 +25,30 @@ sources:
       type: rss
       url: https://www.sec.gov/news/pressreleases.rss
       extract_tickers: false
+    - name: MarketWatch
+      type: rss
+      url: https://feeds.marketwatch.com/marketwatch/topstories/
+      extract_tickers: true
+    - name: Reuters Business
+      type: rss
+      url: https://feeds.reuters.com/reuters/businessNews
+      extract_tickers: true
+    - name: Benzinga
+      type: rss
+      url: https://www.benzinga.com/feed/
+      extract_tickers: true
+    - name: Motley Fool
+      type: rss
+      url: https://www.fool.com/feeds/index.aspx
+      extract_tickers: true
+    - name: Seeking Alpha
+      type: rss
+      url: https://seekingalpha.com/feed.xml
+      extract_tickers: true
+    - name: Investopedia
+      type: rss
+      url: https://www.investopedia.com/feedbuilder/feed/getfeed/?feedName=rss_headline
+      extract_tickers: true
   filings:
     sec_companyfacts: https://data.sec.gov/api/xbrl/companyfacts/
     sec_submissions: https://data.sec.gov/submissions/
@@ -112,4 +136,38 @@ reports:
     - risks
     - pros_and_cons
     - investment_watch_actions
+
+# ---------------------------------------------------------------------------
+# Extended news sources (optional — set enabled: true and supply API keys)
+# ---------------------------------------------------------------------------
+
+news_api:
+  # NewsAPI.org — free tier: 500 req/day. Set NEWSAPI_KEY env var.
+  enabled: false
+  max_articles: 100
+  days_back: 1
+
+reddit:
+  # Reddit public JSON API — no OAuth required.
+  enabled: false
+  subreddits:
+    - investing
+    - stocks
+    - SecurityAnalysis
+  max_posts: 30
+
+# ---------------------------------------------------------------------------
+# AI Agent pipeline (optional — set enabled: true and supply LLM API key)
+# ---------------------------------------------------------------------------
+
+agents:
+  enabled: false
+  # "anthropic" uses ANTHROPIC_API_KEY; "openai" uses OPENAI_API_KEY
+  llm_provider: anthropic
+  # Recommended: use Haiku for cost efficiency; switch to Sonnet for higher quality
+  model: claude-haiku-4-5-20251001
+  max_candidates_to_analyze: 10
+  run_sentiment: true
+  run_fundamentals: true
+  run_thesis: true
 

@@ -3,3 +3,11 @@ pydantic>=2.7.0
 python-dotenv>=1.0.1
 PyYAML>=6.0.1
 requests>=2.32.0
+
+# AI Agent pipeline (install as needed)
+yfinance>=0.2.40
+anthropic>=0.40.0
+openai>=1.50.0
+
+# Extended news sources (install as needed)
+newsapi-python>=0.2.7

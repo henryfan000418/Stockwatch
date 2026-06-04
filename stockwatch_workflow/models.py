@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -32,3 +33,21 @@ class CompanyReport:
     symbol: str
     generated_at: datetime
     sections: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class AgentSignal:
+    """Output from a single AI analyst agent."""
+    signal: str  # "bullish" | "bearish" | "neutral"
+    confidence: float  # 0-100
+    reasoning: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EnrichedStockCandidate:
+    """StockCandidate augmented with AI agent analysis."""
+    base: StockCandidate
+    sentiment: AgentSignal | None = None
+    fundamentals: AgentSignal | None = None
+    thesis: str = ""
+    overall_confidence: float = 0.0
