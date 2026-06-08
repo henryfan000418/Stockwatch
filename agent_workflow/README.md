@@ -15,7 +15,8 @@ It is designed as a first production-friendly skeleton: sources, industry keywor
 
 ## Quick Start
 
-```powershell
+`powershell
+cd C:\Users\herry\Desktop\codex\stockwatch
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
